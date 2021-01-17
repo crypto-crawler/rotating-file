@@ -1,6 +1,6 @@
 [package]
 name = "rotating-file"
-version = "0.3.1"
+version = "0.3.2"
 authors = ["soulmachine <soulmachine@gmail.com>"]
 edition = "2018"
 description   = "A thread-safe rotating file with customizable rotation behavior."
