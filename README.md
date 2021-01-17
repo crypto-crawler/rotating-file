@@ -1,2 +1,3 @@
 # rotating-file
-A rotating file with customizable rotation behavior.
+
+A thread-safe rotating file with customizable rotation behavior.
