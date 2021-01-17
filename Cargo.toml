@@ -1,15 +1,18 @@
 [package]
 name = "rotating-file"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["soulmachine <soulmachine@gmail.com>"]
 edition = "2018"
 description   = "A thread-safe rotating file with customizable rotation behavior."
 license = "Apache-2.0"
 repository = "https://github.com/soulmachine/rotating-file"
-homepage = "https://github.com/soulmachine/rotating-file"
+keywords = ["logging", "log", "logger", "logrotate", "rotating", "rotation"]
 
 [dependencies]
 chrono = "0.4"
 flate2 = "1"
 log = "0.4"
 zip = "0.5.9"
+
+[dev-dependencies]
+lazy_static = "1"

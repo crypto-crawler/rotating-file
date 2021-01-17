@@ -43,6 +43,9 @@ pub struct RotatingFile {
     context: Mutex<CurrentContext>,
 }
 
+unsafe impl Send for RotatingFile {}
+unsafe impl Sync for RotatingFile {}
+
 impl RotatingFile {
     pub fn new(
         root_dir: &str,
@@ -101,7 +104,7 @@ impl RotatingFile {
             .as_secs();
         let next_timestamp = guard.timestamp + self.interval;
 
-        if (self.size > 0 && guard.total_written + s.len() >= self.size * 1024)
+        if (self.size > 0 && guard.total_written + s.len() + 1 >= self.size * 1024)
             || (self.interval > 0 && now >= next_timestamp)
         {
             guard.file.flush()?;
@@ -153,7 +156,6 @@ impl RotatingFile {
         }
 
         let file_path = Path::new(root_dir).join(file_name).into_os_string();
-        println!("{:?}", file_path.as_os_str());
 
         let file = fs::OpenOptions::new()
             .append(true)
@@ -170,7 +172,6 @@ impl RotatingFile {
     }
 
     fn compress(file: OsString, compress: Compression) -> Result<(), Error> {
-        println!("Compressing {:?}", file.as_os_str());
         let mut out_file_path = file.clone();
         match compress {
             Compression::GZip => out_file_path.push(".gz"),
@@ -210,6 +211,7 @@ impl RotatingFile {
 #[cfg(test)]
 mod tests {
     use chrono::{DateTime, NaiveDateTime, Utc};
+    use lazy_static::lazy_static;
     use std::path::Path;
     use std::time::Duration;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -223,12 +225,9 @@ mod tests {
         let rotating_file =
             super::RotatingFile::new(root_dir, Some(1), None, None, None, None, None);
 
-        for _ in 0..(1024 / TEXT.len() + 1) {
+        for _ in 0..24 {
             let _ = rotating_file.writeln(TEXT);
         }
-
-        // // wait for the compression thread
-        // std::thread::sleep(Duration::from_secs(1));
 
         assert!(Path::new(root_dir)
             .join(timestamp.clone() + ".log")
@@ -272,7 +271,7 @@ mod tests {
             None,
         );
 
-        for _ in 0..(1024 / TEXT.len() + 1) {
+        for _ in 0..24 {
             let _ = rotating_file.writeln(TEXT);
         }
 
@@ -301,7 +300,7 @@ mod tests {
             None,
         );
 
-        for _ in 0..(1024 / TEXT.len() + 1) {
+        for _ in 0..24 {
             let _ = rotating_file.writeln(TEXT);
         }
 
@@ -374,6 +373,54 @@ mod tests {
         assert!(Path::new(root_dir).join(timestamp2 + ".log").exists());
 
         let _ = std::fs::remove_dir_all(root_dir);
+    }
+
+    #[test]
+    fn referred_in_two_threads() {
+        lazy_static! {
+            static ref ROOT_DIR: &'static str = "./target/tmp7";
+            static ref ROTATING_FILE: super::RotatingFile = super::RotatingFile::new(
+                *ROOT_DIR,
+                Some(1),
+                None,
+                Some(super::Compression::GZip),
+                None,
+                None,
+                None,
+            );
+        }
+
+        let timestamp = current_timestamp_str();
+        let handle1 = std::thread::spawn(move || {
+            for _ in 0..24 {
+                let _ = ROTATING_FILE.writeln(TEXT);
+            }
+        });
+
+        let handle2 = std::thread::spawn(move || {
+            for _ in 0..24 {
+                let _ = ROTATING_FILE.writeln(TEXT);
+            }
+        });
+
+        let _ = handle1.join();
+        let _ = handle2.join();
+
+        // wait for the compression thread
+        std::thread::sleep(Duration::from_secs(1));
+
+        assert!(Path::new(*ROOT_DIR)
+            .join(timestamp.clone() + ".log.gz")
+            .exists());
+        assert!(Path::new(*ROOT_DIR)
+            .join(timestamp.clone() + "-1.log.gz")
+            .exists());
+
+        let third_file = Path::new(*ROOT_DIR).join(timestamp.clone() + "-2.log");
+        assert!(third_file.exists());
+        assert_eq!(0, std::fs::metadata(third_file).unwrap().len());
+
+        let _ = std::fs::remove_dir_all(*ROOT_DIR);
     }
 
     fn current_timestamp_str() -> String {
