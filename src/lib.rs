@@ -46,8 +46,6 @@ struct CurrentContext {
     file_path: OsString,
     timestamp: u64,
     total_written: usize,
-    // compression threads
-    handles: Vec<JoinHandle<Result<(), Error>>>,
 }
 
 /// A thread-safe rotating file with customizable rotation behavior.
@@ -70,6 +68,8 @@ pub struct RotatingFile {
 
     // current context
     context: Mutex<CurrentContext>,
+    // compression threads
+    handles: Mutex<Vec<JoinHandle<Result<(), Error>>>>,
 }
 
 unsafe impl Send for RotatingFile {}
@@ -100,7 +100,7 @@ impl RotatingFile {
             now
         };
 
-        let date_format = date_format.unwrap_or("%Y-%m-%d-%H-%M-%S".to_string());
+        let date_format = date_format.unwrap_or_else(|| "%Y-%m-%d-%H-%M-%S".to_string());
         let prefix = prefix.unwrap_or("".to_string());
         let suffix = suffix.unwrap_or(".log".to_string());
 
@@ -121,6 +121,7 @@ impl RotatingFile {
             prefix,
             suffix,
             context: Mutex::new(context),
+            handles: Mutex::new(Vec::new()),
         }
     }
 
@@ -142,7 +143,7 @@ impl RotatingFile {
             if let Some(c) = self.compression {
                 let input_file = guard.file_path.clone();
                 let handle = std::thread::spawn(move || Self::compress(input_file, c));
-                guard.handles.push(handle);
+                self.handles.lock().unwrap().push(handle);
             }
 
             // reset context
@@ -169,23 +170,18 @@ impl RotatingFile {
     }
 
     pub fn close(&self) {
-        let mut guard = self.context.lock().unwrap();
-
-        if let Err(e) = guard.file.flush() {
-            error!("{}", e);
-        }
-
-        let mut v: Vec<JoinHandle<Result<(), Error>>> = Vec::new();
-        std::mem::swap(&mut v, &mut guard.handles);
-
-        for h in v {
-            if let Err(e) = h.join().unwrap() {
+        // wait for compression threads
+        let mut handles = self.handles.lock().unwrap();
+        for handle in handles.drain(..) {
+            if let Err(e) = handle.join().unwrap() {
                 error!("{}", e);
             }
         }
 
-        guard.file.flush().unwrap();
-        std::mem::drop(&guard.file);
+        // let mut guard = self.context.lock().unwrap();
+        if let Err(e) = self.context.lock().unwrap().file.flush() {
+            error!("{}", e);
+        }
     }
 
     fn create_context(
@@ -218,7 +214,6 @@ impl RotatingFile {
             file_path,
             timestamp,
             total_written: 0,
-            handles: Vec::new(),
         }
     }
 
@@ -234,12 +229,12 @@ impl RotatingFile {
             .create(true)
             .open(out_file_path.as_os_str())?;
 
-        let mut input_buf = fs::read(file.as_os_str())?;
+        let input_buf = fs::read(file.as_os_str())?;
 
         match compress {
             Compression::GZip => {
                 let mut encoder = GzEncoder::new(out_file, flate2::Compression::new(9));
-                encoder.write_all(&mut input_buf)?;
+                encoder.write_all(&input_buf)?;
                 encoder.flush()?;
             }
             Compression::Zip => {
