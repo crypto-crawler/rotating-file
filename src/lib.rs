@@ -71,6 +71,19 @@ unsafe impl Send for RotatingFile {}
 unsafe impl Sync for RotatingFile {}
 
 impl RotatingFile {
+    /// Creates a new RotatingFile.
+    ///
+    /// ## Arguments
+    ///
+    /// - `root_dir` The directory to store files.
+    /// - `size` Max size(in kilobytes) of the file after which it will rotate,
+    /// `None` and `0` mean unlimited.
+    /// - `interval` How often(in seconds) to rotate, 0 means unlimited.
+    /// - `compression` Available values are `GZip` and `Zip`, default to `None`
+    /// - `date_format` uses the syntax from chrono
+    /// <https://docs.rs/chrono/latest/chrono/format/strftime/>, default to `%Y-%m-%d-%H-%M-%S`
+    /// - `prefix` File name prefix, default to empty
+    /// - `suffix` File name suffix, default to `.log`
     pub fn new(
         root_dir: &str,
         size: Option<usize>,
