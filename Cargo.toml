@@ -6,7 +6,7 @@ edition = "2018"
 description   = "A thread-safe rotating file with customizable rotation behavior."
 license = "Apache-2.0"
 repository = "https://github.com/soulmachine/rotating-file"
-keywords = ["logging", "log", "logger", "logrotate", "rotating", "rotation"]
+keywords = ["logging", "logrotate", "rotating"]
 
 [dependencies]
 chrono = "0.4"
