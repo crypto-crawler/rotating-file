@@ -19,12 +19,12 @@
 //! assert_eq!(2, std::fs::read_dir(root_dir).unwrap().count());
 //! std::fs::remove_dir_all(root_dir).unwrap();
 //! ```
-use std::io::BufWriter;
 use std::io::Write;
 use std::path::Path;
 use std::thread::JoinHandle;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{ffi::OsString, fs, io::Error, sync::Mutex};
+use std::{io::BufWriter, sync::Arc};
 
 use chrono::{DateTime, NaiveDateTime, Utc};
 use flate2::write::GzEncoder;
@@ -64,7 +64,7 @@ pub struct RotatingFile {
     // current context
     context: Mutex<CurrentContext>,
     // compression threads
-    handles: Mutex<Vec<JoinHandle<Result<(), Error>>>>,
+    handles: Arc<Mutex<Vec<JoinHandle<Result<(), Error>>>>>,
 }
 
 unsafe impl Send for RotatingFile {}
@@ -120,7 +120,7 @@ impl RotatingFile {
             prefix,
             suffix,
             context: Mutex::new(context),
-            handles: Mutex::new(Vec::new()),
+            handles: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -136,6 +136,7 @@ impl RotatingFile {
             || (self.interval > 0 && now >= (guard.timestamp + self.interval))
         {
             guard.file.flush()?;
+            guard.file.get_ref().sync_all()?;
             let old_file = guard.file_path.clone();
 
             // reset context
@@ -149,7 +150,8 @@ impl RotatingFile {
 
             // compress in a background thread
             if let Some(c) = self.compression {
-                let handle = std::thread::spawn(move || Self::compress(old_file, c));
+                let handles_clone = self.handles.clone();
+                let handle = std::thread::spawn(move || Self::compress(old_file, c, handles_clone));
                 self.handles.lock().unwrap().push(handle);
             }
         }
@@ -175,9 +177,13 @@ impl RotatingFile {
                 error!("{}", e);
             }
         }
+        drop(handles);
 
-        // let mut guard = self.context.lock().unwrap();
-        if let Err(e) = self.context.lock().unwrap().file.flush() {
+        let mut guard = self.context.lock().unwrap();
+        if let Err(e) = guard.file.flush() {
+            error!("{}", e);
+        }
+        if let Err(e) = guard.file.get_ref().sync_all() {
             error!("{}", e);
         }
     }
@@ -225,7 +231,11 @@ impl RotatingFile {
         }
     }
 
-    fn compress(file: OsString, compress: Compression) -> Result<(), Error> {
+    fn compress(
+        file: OsString,
+        compress: Compression,
+        handles: Arc<Mutex<Vec<JoinHandle<Result<(), Error>>>>>,
+    ) -> Result<(), Error> {
         let mut out_file_path = file.clone();
         match compress {
             Compression::GZip => out_file_path.push(".gz"),
@@ -258,7 +268,17 @@ impl RotatingFile {
             }
         }
 
-        fs::remove_file(file.as_os_str())
+        let ret = fs::remove_file(file.as_os_str());
+
+        // remove from the handles vector
+        if let Ok(ref mut guard) = handles.try_lock() {
+            let current_id = std::thread::current().id();
+            if let Some(pos) = guard.iter().position(|h| h.thread().id() == current_id) {
+                guard.remove(pos);
+            }
+        }
+
+        ret
     }
 }
 
