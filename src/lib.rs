@@ -98,22 +98,13 @@ impl RotatingFile {
         }
 
         let interval = interval.unwrap_or(0);
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        let timestamp = if interval > 0 {
-            now / interval * interval
-        } else {
-            now
-        };
 
         let date_format = date_format.unwrap_or_else(|| "%Y-%m-%d-%H-%M-%S".to_string());
         let prefix = prefix.unwrap_or("".to_string());
         let suffix = suffix.unwrap_or(".log".to_string());
 
         let context = Self::create_context(
-            timestamp,
+            interval,
             root_dir,
             date_format.as_str(),
             prefix.as_str(),
@@ -140,28 +131,27 @@ impl RotatingFile {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        let next_timestamp = guard.timestamp + self.interval;
 
         if (self.size > 0 && guard.total_written + s.len() + 1 >= self.size * 1024)
-            || (self.interval > 0 && now >= next_timestamp)
+            || (self.interval > 0 && now >= (guard.timestamp + self.interval))
         {
             guard.file.flush()?;
-
-            // compress in a background thread
-            if let Some(c) = self.compression {
-                let input_file = guard.file_path.clone();
-                let handle = std::thread::spawn(move || Self::compress(input_file, c));
-                self.handles.lock().unwrap().push(handle);
-            }
+            let old_file = guard.file_path.clone();
 
             // reset context
             *guard = Self::create_context(
-                next_timestamp,
+                self.interval,
                 self.root_dir.as_str(),
                 self.date_format.as_str(),
                 self.prefix.as_str(),
                 self.suffix.as_str(),
             );
+
+            // compress in a background thread
+            if let Some(c) = self.compression {
+                let handle = std::thread::spawn(move || Self::compress(old_file, c));
+                self.handles.lock().unwrap().push(handle);
+            }
         }
 
         if let Err(e) = writeln!(&mut guard.file, "{}", s) {
@@ -193,12 +183,22 @@ impl RotatingFile {
     }
 
     fn create_context(
-        timestamp: u64,
+        interval: u64,
         root_dir: &str,
         date_format: &str,
         prefix: &str,
         suffix: &str,
     ) -> CurrentContext {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let timestamp = if interval > 0 {
+            now / interval * interval
+        } else {
+            now
+        };
+
         let dt = DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(timestamp as i64, 0), Utc);
         let dt_str = dt.format(date_format).to_string();
 
