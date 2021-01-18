@@ -210,7 +210,12 @@ impl RotatingFile {
 
         let mut file_name = format!("{}{}{}", prefix, dt_str, suffix);
         let mut index = 1;
-        while Path::new(root_dir).join(file_name.as_str()).exists() {
+        while Path::new(root_dir).join(file_name.as_str()).exists()
+            || Path::new(root_dir).join(file_name.clone() + ".gz").exists()
+            || Path::new(root_dir)
+                .join(file_name.clone() + ".zip")
+                .exists()
+        {
             file_name = format!("{}{}-{}{}", prefix, dt_str, index, suffix);
             index += 1;
         }
