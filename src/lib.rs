@@ -100,8 +100,8 @@ impl RotatingFile {
         let interval = interval.unwrap_or(0);
 
         let date_format = date_format.unwrap_or_else(|| "%Y-%m-%d-%H-%M-%S".to_string());
-        let prefix = prefix.unwrap_or("".to_string());
-        let suffix = suffix.unwrap_or(".log".to_string());
+        let prefix = prefix.unwrap_or_else(|| "".to_string());
+        let suffix = suffix.unwrap_or_else(|| ".log".to_string());
 
         let context = Self::create_context(
             interval,
@@ -290,7 +290,7 @@ impl RotatingFile {
 #[cfg(test)]
 mod tests {
     use chrono::{DateTime, Utc};
-    use lazy_static::lazy_static;
+    use once_cell::sync::Lazy;
     use std::path::Path;
     use std::time::Duration;
     use std::time::SystemTime;
@@ -487,9 +487,9 @@ mod tests {
 
     #[test]
     fn referred_in_two_threads() {
-        lazy_static! {
-            static ref ROOT_DIR: &'static str = "./target/tmp7";
-            static ref ROTATING_FILE: super::RotatingFile = super::RotatingFile::new(
+        static ROOT_DIR: Lazy<&'static str> = Lazy::new(|| "./target/tmp7");
+        static ROTATING_FILE: Lazy<super::RotatingFile> = Lazy::new(|| {
+            super::RotatingFile::new(
                 *ROOT_DIR,
                 Some(1),
                 None,
@@ -497,8 +497,8 @@ mod tests {
                 None,
                 None,
                 None,
-            );
-        }
+            )
+        });
         let _ = std::fs::remove_dir_all(*ROOT_DIR);
 
         let timestamp = current_timestamp_str();
